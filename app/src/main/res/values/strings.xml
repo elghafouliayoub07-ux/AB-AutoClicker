@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AB AutoClicker</string>
+    <string name="service_desc">كتسمح لـ AB AutoClicker ينقر أوتوماتيكياً على النقط اللي حطيتي فالشاشة. ما كتقرا حتى شي معلومات.</string>
+</resources>
