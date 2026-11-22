@@ -6,18 +6,20 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.Point;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.LinearLayout;
@@ -30,10 +32,19 @@ import java.util.List;
 /**
  * خدمة إمكانية الوصول: كتعرض اللوحة العائمة والنقط، وكتنفّذ الماكرو.
  * الماكرو = خطوات بالترتيب؛ كل خطوة فيها نقطة وحدة ولا بزاف كيتنقرو فنفس اللحظة.
+ * كل نقطة تقدر تكون نقرة وحدة (×1) ولا نقرة مزدوجة (×2).
  */
 public class ClickService extends AccessibilityService {
 
     static ClickService instance;
+
+    // مقاسات صغيرة باش اللوحة ما تعمرش الشاشة
+    private static final int BTN_DP = 36;
+    private static final int POINT_DP = 42;
+
+    // توقيت النقرة المزدوجة
+    private static final long TAP_MS = 30;
+    private static final long DOUBLE_GAP_MS = 90;
 
     private WindowManager wm;
     private Handler handler;
@@ -41,11 +52,12 @@ public class ClickService extends AccessibilityService {
     private LinearLayout panel;
     private WindowManager.LayoutParams panelLp;
     private TextView playBtn;
+    private final List<View> extraButtons = new ArrayList<>();
 
     private final List<TextView> points = new ArrayList<>();
     private final List<WindowManager.LayoutParams> pointLps = new ArrayList<>();
-    /** رقم الخطوة ديال كل نقطة (النقط اللي عندهم نفس الرقم كيتنقرو مع بعض). */
     private final List<Integer> pointSteps = new ArrayList<>();
+    private final List<Integer> pointTaps = new ArrayList<>(); // 1 ولا 2
 
     private boolean running = false;
     private int stepIndex = 0;
@@ -85,10 +97,24 @@ public class ClickService extends AccessibilityService {
         super.onDestroy();
     }
 
+    /** ملي كتدور الشاشة: نرجعو اللوحة والنقط لداخل الشاشة. */
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (handler != null) handler.postDelayed(this::keepAllOnScreen, 300);
+    }
+
     // ───────────── أدوات مساعدة ─────────────
 
     private int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private Point screenSize() {
+        Point p = new Point();
+        //noinspection deprecation
+        wm.getDefaultDisplay().getRealSize(p);
+        return p;
     }
 
     private WindowManager.LayoutParams overlayParams() {
@@ -108,12 +134,35 @@ public class ClickService extends AccessibilityService {
         return lp;
     }
 
-    /** كيخلي أي نافذة عائمة تتجر بالصبع. */
+    private void clamp(View v, WindowManager.LayoutParams lp) {
+        Point s = screenSize();
+        int w = v.getWidth() > 0 ? v.getWidth() : dp(BTN_DP);
+        int h = v.getHeight() > 0 ? v.getHeight() : dp(BTN_DP);
+        lp.x = Math.max(0, Math.min(lp.x, s.x - w));
+        lp.y = Math.max(0, Math.min(lp.y, s.y - h));
+    }
+
+    private void keepAllOnScreen() {
+        if (panel != null) {
+            clamp(panel, panelLp);
+            try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) { }
+        }
+        for (int i = 0; i < points.size(); i++) {
+            clamp(points.get(i), pointLps.get(i));
+            try { wm.updateViewLayout(points.get(i), pointLps.get(i)); } catch (Exception ignored) { }
+        }
+    }
+
+    /**
+     * كيخلي النافذة تتجر بالصبع. إلا كانت لمسة قصيرة بلا حركة، كتحسب click.
+     */
     @SuppressLint("ClickableViewAccessibility")
     private void makeDraggable(View handleView, View windowView, WindowManager.LayoutParams lp) {
+        final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
         handleView.setOnTouchListener(new View.OnTouchListener() {
             int startX, startY;
             float touchX, touchY;
+            boolean moved;
 
             @Override
             public boolean onTouch(View v, MotionEvent e) {
@@ -123,11 +172,25 @@ public class ClickService extends AccessibilityService {
                         startY = lp.y;
                         touchX = e.getRawX();
                         touchY = e.getRawY();
+                        moved = false;
+                        v.setPressed(true);
                         return true;
                     case MotionEvent.ACTION_MOVE:
-                        lp.x = startX + Math.round(e.getRawX() - touchX);
-                        lp.y = startY + Math.round(e.getRawY() - touchY);
-                        try { wm.updateViewLayout(windowView, lp); } catch (Exception ignored) { }
+                        float dx = e.getRawX() - touchX, dy = e.getRawY() - touchY;
+                        if (!moved && Math.hypot(dx, dy) > slop) moved = true;
+                        if (moved) {
+                            lp.x = startX + Math.round(dx);
+                            lp.y = startY + Math.round(dy);
+                            clamp(windowView, lp);
+                            try { wm.updateViewLayout(windowView, lp); } catch (Exception ignored) { }
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        v.setPressed(false);
+                        if (!moved) v.performClick();
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        v.setPressed(false);
                         return true;
                 }
                 return false;
@@ -139,20 +202,19 @@ public class ClickService extends AccessibilityService {
         TextView b = new TextView(this);
         b.setText(label);
         b.setTextColor(Color.WHITE);
-        b.setTextSize(20);
+        b.setTextSize(15);
         b.setGravity(Gravity.CENTER);
         b.setTypeface(Typeface.DEFAULT_BOLD);
         GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
         bg.setColor(bgColor);
-        bg.setCornerRadius(dp(12));
         b.setBackground(bg);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(48), dp(48));
-        p.setMargins(dp(4), dp(4), dp(4), dp(4));
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(BTN_DP), dp(BTN_DP));
+        p.setMargins(dp(2), dp(2), dp(2), dp(2));
         b.setLayoutParams(p);
-        if (click != null) b.setOnClickListener(click);
+        b.setOnClickListener(click);
         return b;
     }
-
 
     // ───────────── اللوحة العائمة ─────────────
 
@@ -161,30 +223,35 @@ public class ClickService extends AccessibilityService {
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(4), dp(4), dp(4), dp(4));
+        panel.setPadding(dp(3), dp(3), dp(3), dp(3));
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xE0202124);
-        bg.setCornerRadius(dp(16));
+        bg.setColor(0xCC1F1F23);
+        bg.setCornerRadius(dp(22));
         panel.setBackground(bg);
 
-        TextView drag = panelButton("✥", 0xFF5F6368, null);
+        panelLp = overlayParams();
+        panelLp.x = dp(6);
+        panelLp.y = dp(160);
+
         playBtn = panelButton("▶", 0xFF1E8E3E, v -> toggle());
         TextView addStep = panelButton("+", 0xFF1A73E8, v -> addPoint(false));
         TextView addSame = panelButton("⧉", 0xFF8430CE, v -> addPoint(true));
         TextView remove = panelButton("−", 0xFFE37400, v -> removeLastPoint());
-        TextView close = panelButton("✕", 0xFFD93025, v -> hidePanel());
+        TextView close = panelButton("✕", 0xFF5F6368, v -> hidePanel());
 
-        panel.addView(drag);
+        extraButtons.clear();
+        extraButtons.add(addStep);
+        extraButtons.add(addSame);
+        extraButtons.add(remove);
+        extraButtons.add(close);
+
         panel.addView(playBtn);
-        panel.addView(addStep);
-        panel.addView(addSame);
-        panel.addView(remove);
-        panel.addView(close);
+        for (View b : extraButtons) panel.addView(b);
 
-        panelLp = overlayParams();
-        panelLp.x = dp(8);
-        panelLp.y = dp(140);
-        makeDraggable(drag, panel, panelLp);
+        // اللوحة كتتجر من أي زر فيها
+        makeDraggable(playBtn, panel, panelLp);
+        for (View b : extraButtons) makeDraggable(b, panel, panelLp);
+
         wm.addView(panel, panelLp);
 
         if (points.isEmpty()) addPoint(false);
@@ -198,65 +265,89 @@ public class ClickService extends AccessibilityService {
         points.clear();
         pointLps.clear();
         pointSteps.clear();
+        pointTaps.clear();
         if (panel != null) {
             try { wm.removeView(panel); } catch (Exception ignored) { }
             panel = null;
         }
     }
 
+    /** ملي كيخدم: كيبقى غير زر التشغيل/الإيقاف. */
+    private void setPanelCollapsed(boolean collapsed) {
+        for (View b : extraButtons) b.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+        if (panel != null) {
+            try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) { }
+        }
+    }
+
     // ───────────── النقط والخطوات ─────────────
 
-    /** لون حسب رقم الخطوة، باش النقط ديال نفس الخطوة يبانو بنفس اللون. */
     private static final int[] STEP_COLORS = {
-            0xAAD93025, 0xAA1A73E8, 0xAA1E8E3E, 0xAAE37400,
-            0xAA8430CE, 0xAA00838F, 0xAAC2185B, 0xAA6D4C41
+            0xCCD93025, 0xCC1A73E8, 0xCC1E8E3E, 0xCCE37400,
+            0xCC8430CE, 0xCC00838F, 0xCCC2185B, 0xCC6D4C41
     };
 
     private int lastStep() {
         return pointSteps.isEmpty() ? 0 : pointSteps.get(pointSteps.size() - 1);
     }
 
-    /**
-     * @param sameStep true = النقطة كتزاد لنفس الخطوة ديال آخر نقطة (كيتنقرو مع بعض)،
-     *                 false = خطوة جديدة.
-     */
-    private void addPoint(boolean sameStep) {
-        if (running) return;
-        int step = (sameStep && !points.isEmpty()) ? lastStep() : lastStep() + 1;
-
-        TextView p = new TextView(this);
-        p.setText(String.valueOf(step));
-        p.setTextColor(Color.WHITE);
-        p.setTextSize(16);
-        p.setTypeface(Typeface.DEFAULT_BOLD);
-        p.setGravity(Gravity.CENTER);
+    private void refreshPoint(int i) {
+        TextView p = points.get(i);
+        int step = pointSteps.get(i);
+        boolean dbl = pointTaps.get(i) == 2;
+        p.setText(dbl ? step + "\n×2" : String.valueOf(step));
+        p.setTextSize(dbl ? 11 : 14);
+        p.setLineSpacing(0, 0.85f);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(STEP_COLORS[(step - 1) % STEP_COLORS.length]);
-        circle.setStroke(dp(3), Color.WHITE);
+        circle.setStroke(dp(dbl ? 4 : 2), dbl ? 0xFFFFD600 : Color.WHITE);
         p.setBackground(circle);
+    }
+
+    private void addPoint(boolean sameStep) {
+        if (running) return;
+        boolean joinLast = sameStep && !points.isEmpty();
+        int step = joinLast ? lastStep() : lastStep() + 1;
+
+        TextView p = new TextView(this);
+        p.setTextColor(Color.WHITE);
+        p.setTypeface(Typeface.DEFAULT_BOLD);
+        p.setGravity(Gravity.CENTER);
 
         WindowManager.LayoutParams lp = overlayParams();
-        int size = dp(52);
+        int size = dp(POINT_DP);
         lp.width = size;
         lp.height = size;
-        if (sameStep && !points.isEmpty()) {
-            // حدا آخر نقطة باش يبان أنهم مجموعة وحدة
+        Point s = screenSize();
+        if (joinLast) {
             WindowManager.LayoutParams prev = pointLps.get(pointLps.size() - 1);
-            lp.x = prev.x + dp(60);
+            lp.x = prev.x + dp(50);
             lp.y = prev.y;
         } else {
-            DisplayMetrics dm = getResources().getDisplayMetrics();
             int n = step - 1;
-            lp.x = dm.widthPixels / 2 - size / 2 + (n % 4) * dp(24) - dp(36);
-            lp.y = dm.heightPixels / 2 - size / 2 + (n / 4 % 6) * dp(64) - dp(120);
+            lp.x = s.x / 2 - size / 2 + (n % 4) * dp(22) - dp(33);
+            lp.y = s.y / 2 - size / 2 + (n / 4 % 6) * dp(52) - dp(100);
         }
+        lp.x = Math.max(0, Math.min(lp.x, s.x - size));
+        lp.y = Math.max(0, Math.min(lp.y, s.y - size));
 
-        makeDraggable(p, p, lp);
-        wm.addView(p, lp);
         points.add(p);
         pointLps.add(lp);
         pointSteps.add(step);
+        pointTaps.add(1);
+        refreshPoint(points.size() - 1);
+
+        // لمسة قصيرة على النقطة = تبديل بين نقرة وحدة ونقرة مزدوجة
+        p.setOnClickListener(v -> {
+            if (running) return;
+            int i = points.indexOf(p);
+            if (i < 0) return;
+            pointTaps.set(i, pointTaps.get(i) == 2 ? 1 : 2);
+            refreshPoint(i);
+        });
+        makeDraggable(p, p, lp);
+        wm.addView(p, lp);
     }
 
     private void removeLastPoint() {
@@ -266,6 +357,7 @@ public class ClickService extends AccessibilityService {
         points.remove(last);
         pointLps.remove(last);
         pointSteps.remove(last);
+        pointTaps.remove(last);
     }
 
     /** ملي كيخدم النقر، النقط كيوليو شفافين للّمس باش النقرة توصل للتطبيق اللي تحتهم. */
@@ -277,7 +369,7 @@ public class ClickService extends AccessibilityService {
             } else {
                 lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
             }
-            points.get(i).setAlpha(touchable ? 1f : 0.45f);
+            points.get(i).setAlpha(touchable ? 1f : 0.35f);
             try { wm.updateViewLayout(points.get(i), lp); } catch (Exception ignored) { }
         }
     }
@@ -300,9 +392,9 @@ public class ClickService extends AccessibilityService {
 
         int maxStrokes = GestureDescription.getMaxStrokeCount();
         for (int s = 1; s <= lastStep(); s++) {
-            if (pointsOfStep(s).size() > maxStrokes) {
-                Toast.makeText(this, "التليفون كيقبل غير " + maxStrokes
-                        + " نقرات فلحظة وحدة (الخطوة " + s + ")", Toast.LENGTH_LONG).show();
+            if (strokesOfStep(s) > maxStrokes) {
+                Toast.makeText(this, "الخطوة " + s + " فيها بزاف ديال النقرات فلحظة وحدة (الحد: "
+                        + maxStrokes + ")", Toast.LENGTH_LONG).show();
                 break;
             }
         }
@@ -311,9 +403,9 @@ public class ClickService extends AccessibilityService {
         stepIndex = 0;
         cyclesDone = 0;
         setPointsTouchable(false);
+        setPanelCollapsed(true);
         playBtn.setText("■");
         ((GradientDrawable) playBtn.getBackground()).setColor(0xFFD93025);
-        // تأخير صغير باش النوافذ يتحدّثو قبل أول نقرة
         handler.postDelayed(step, 150);
     }
 
@@ -324,15 +416,22 @@ public class ClickService extends AccessibilityService {
             playBtn.setText("▶");
             ((GradientDrawable) playBtn.getBackground()).setColor(0xFF1E8E3E);
         }
+        setPanelCollapsed(false);
         if (!points.isEmpty()) setPointsTouchable(true);
     }
 
-    private List<TextView> pointsOfStep(int s) {
-        List<TextView> out = new ArrayList<>();
+    private List<Integer> indexesOfStep(int s) {
+        List<Integer> out = new ArrayList<>();
         for (int i = 0; i < points.size(); i++) {
-            if (pointSteps.get(i) == s) out.add(points.get(i));
+            if (pointSteps.get(i) == s) out.add(i);
         }
         return out;
+    }
+
+    private int strokesOfStep(int s) {
+        int n = 0;
+        for (int i : indexesOfStep(s)) n += pointTaps.get(i);
+        return n;
     }
 
     /** كل مرة كينفّذ خطوة وحدة: النقط ديالها كاملين كيتنقرو فنفس اللحظة. */
@@ -344,35 +443,48 @@ public class ClickService extends AccessibilityService {
             if (totalSteps == 0) { stopClicking(); return; }
             if (stepIndex >= totalSteps) stepIndex = 0;
 
-            tapTogether(pointsOfStep(stepIndex + 1));
+            long gestureMs = tapTogether(indexesOfStep(stepIndex + 1));
 
             stepIndex++;
             if (stepIndex >= totalSteps) {
                 stepIndex = 0;
                 cyclesDone++;
                 if (maxCycles > 0 && cyclesDone >= maxCycles) {
-                    stopClicking();
+                    handler.postDelayed(ClickService.this::stopClicking, gestureMs + 20);
                     return;
                 }
             }
-            handler.postDelayed(this, intervalMs);
+            // ما نبداوش النقرة الجاية قبل ما تسالي هادي (باش ما تتقطعش النقرة المزدوجة)
+            handler.postDelayed(this, Math.max(intervalMs, gestureMs + 20));
         }
     };
 
-    /** نقرة وحدة ولا بزاف فنفس اللحظة (multi-touch). */
-    private void tapTogether(List<TextView> group) {
-        if (group.isEmpty()) return;
+    /**
+     * كينقر على مجموعة ديال النقط فنفس اللحظة (multi-touch)، مع دعم النقرة المزدوجة.
+     * @return المدة ديال الحركة بالميلي ثانية
+     */
+    private long tapTogether(List<Integer> idx) {
+        if (idx.isEmpty()) return 0;
         GestureDescription.Builder builder = new GestureDescription.Builder();
-        int max = Math.min(group.size(), GestureDescription.getMaxStrokeCount());
+        int maxStrokes = GestureDescription.getMaxStrokeCount();
+        int used = 0;
+        long duration = TAP_MS;
         int[] loc = new int[2];
-        for (int i = 0; i < max; i++) {
-            TextView p = group.get(i);
+        for (int i : idx) {
+            TextView p = points.get(i);
             p.getLocationOnScreen(loc);
-            Path path = new Path();
-            path.moveTo(Math.max(0, loc[0] + p.getWidth() / 2f),
-                    Math.max(0, loc[1] + p.getHeight() / 2f));
-            builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 10));
+            float x = Math.max(0, loc[0] + p.getWidth() / 2f);
+            float y = Math.max(0, loc[1] + p.getHeight() / 2f);
+            int taps = pointTaps.get(i);
+            for (int t = 0; t < taps && used < maxStrokes; t++, used++) {
+                Path path = new Path();
+                path.moveTo(x, y);
+                long start = t * (TAP_MS + DOUBLE_GAP_MS);
+                builder.addStroke(new GestureDescription.StrokeDescription(path, start, TAP_MS));
+                duration = Math.max(duration, start + TAP_MS);
+            }
         }
         dispatchGesture(builder.build(), null, null);
+        return duration;
     }
 }
