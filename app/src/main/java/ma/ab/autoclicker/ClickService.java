@@ -96,6 +96,16 @@ public class ClickService extends AccessibilityService {
     private View editor;
     private View macrosSheet;
 
+    // ── المؤقت فوق الشاشة ──
+    private TextView timerView;
+    private long nextCycleAt = 0;      // uptime ديال بداية الدورة الجاية (0 = كينقر دابا)
+    private final Runnable timerTick = new Runnable() {
+        @Override public void run() {
+            updateTimer();
+            if (timerView != null && running) handler.postDelayed(this, 100);
+        }
+    };
+
     private boolean running = false;
     private boolean sleeping = false;
     private int stepIndex = 0;
@@ -476,6 +486,8 @@ public class ClickService extends AccessibilityService {
         }
         boolean pointsTouchable = !sleeping && !running;
         for (Pt p : pts) {
+            // INVISIBLE (ماشي GONE) باش البلاصة ديال النقطة تبقى معروفة والماكرو يقدر يكمل
+            p.view.setVisibility(sleeping ? View.INVISIBLE : View.VISIBLE);
             setTouchable(p.view, p.lp, pointsTouchable);
             p.view.setAlpha(pointsTouchable ? 1f : 0.4f);
         }
@@ -856,6 +868,59 @@ public class ClickService extends AccessibilityService {
         }
     }
 
+    // ───────────── المؤقت فوق الشاشة ─────────────
+
+    private void showTimer() {
+        hideTimer();
+        if (!getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                .getBoolean(MainActivity.KEY_SHOW_TIMER, true)) return;
+        TextView t = new TextView(this);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(13);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(14), dp(6), dp(14), dp(6));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(16));
+        bg.setColor(0xE0B42318);
+        t.setBackground(bg);
+        WindowManager.LayoutParams lp = overlayParams();
+        lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        lp.y = dp(30);
+        try {
+            wm.addView(t, lp);
+            timerView = t;
+            handler.removeCallbacks(timerTick);
+            handler.post(timerTick);
+        } catch (Exception ignored) { }
+    }
+
+    private void hideTimer() {
+        if (handler != null) handler.removeCallbacks(timerTick);
+        if (timerView != null) {
+            try { wm.removeView(timerView); } catch (Exception ignored) { }
+            timerView = null;
+        }
+    }
+
+    private void updateTimer() {
+        if (timerView == null) return;
+        String cycle = maxCycles > 0
+                ? "دورة " + (cyclesDone + 1) + "/" + maxCycles
+                : "دورة " + (cyclesDone + 1);
+        long left = nextCycleAt - SystemClock.uptimeMillis();
+        GradientDrawable bg = (GradientDrawable) timerView.getBackground();
+        if (nextCycleAt > 0 && left > 0) {
+            timerView.setText("🟢  الدورة الجاية فـ " + String.format(java.util.Locale.US, "%.1f", left / 1000.0)
+                    + " ث  ·  " + cycle);
+            bg.setColor(0xE0157A3F);
+        } else {
+            timerView.setText("🔴  كينقر… ما تلمسش  ·  " + cycle);
+            bg.setColor(0xE0B42318);
+        }
+    }
+
     // ───────────── التشغيل والإيقاف ─────────────
 
     void toggle() {
@@ -894,6 +959,8 @@ public class ClickService extends AccessibilityService {
         playBtn.setText("■");
         ((GradientDrawable) playBtn.getBackground()).setColor(0xFFE5484D);
         updateNotification();
+        nextCycleAt = 0;
+        showTimer();
         post(this::runStep, 150);
     }
 
@@ -907,6 +974,8 @@ public class ClickService extends AccessibilityService {
         }
         refreshPanelButtons();
         applyTouchability();
+        hideTimer();
+        nextCycleAt = 0;
         if (was) updateNotification();
     }
 
@@ -955,6 +1024,7 @@ public class ClickService extends AccessibilityService {
         int total = totalSteps();
         if (total == 0) { stopClicking(); return; }
         if (stepIndex >= total) stepIndex = 0;
+        nextCycleAt = 0;
         runBucket(buildTimeline(pointsOfStep(stepIndex + 1)), 0);
     }
 
@@ -982,6 +1052,7 @@ public class ClickService extends AccessibilityService {
                 return;
             }
             wait = cycleIntervalMs; // الوقت بين دورة ودورة
+            nextCycleAt = SystemClock.uptimeMillis() + wait;
         }
         post(this::runStep, Math.max(0, wait - TAP_MS - 10));
     }

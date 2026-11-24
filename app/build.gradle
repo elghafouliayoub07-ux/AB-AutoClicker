@@ -10,8 +10,8 @@ android {
         applicationId 'ma.ab.autoclicker'
         minSdk 24
         targetSdk 34
-        versionCode 7
-        versionName '1.6'
+        versionCode 8
+        versionName '1.7'
     }
 
     // مفتاح توقيع ثابت: باش كل نسخة جديدة تتثبت فوق القديمة بلا مشكل

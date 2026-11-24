@@ -33,6 +33,7 @@ public class MainActivity extends Activity {
     static final String KEY_INTERVAL = "interval";
     static final String KEY_CYCLE_INTERVAL = "cycleInterval";
     static final String KEY_CYCLES = "cycles";
+    static final String KEY_SHOW_TIMER = "showTimer";
     static final long MIN_INTERVAL = 30;
 
     private static final int BG = 0xFF0F1115;
@@ -137,6 +138,17 @@ public class MainActivity extends Activity {
         cyclesInput = number(String.valueOf(prefs.getLong(KEY_CYCLES, 0)));
         settings.addView(cyclesInput);
         settings.addView(hint("0 = بلا توقف · 1000 ms = ثانية"));
+        android.widget.Switch timerSwitch = new android.widget.Switch(this);
+        timerSwitch.setText("⏱  عرض المؤقت فوق الشاشة");
+        timerSwitch.setTextColor(Color.WHITE);
+        timerSwitch.setTextSize(14);
+        timerSwitch.setChecked(prefs.getBoolean(KEY_SHOW_TIMER, true));
+        timerSwitch.setOnCheckedChangeListener((b, on) ->
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_SHOW_TIMER, on).apply());
+        LinearLayout.LayoutParams tsp = full();
+        tsp.topMargin = dp(16);
+        settings.addView(timerSwitch, tsp);
+        settings.addView(hint("🔴 = كينقر دابا، ما تلمسش الشاشة · 🟢 = عد تنازلي للدورة الجاية، تقدر تلمس"));
         settings.addView(hint("✓ كيتحفظو أوتوماتيكياً ملي كتكتب"));
         root.addView(settings);
 
@@ -168,7 +180,7 @@ public class MainActivity extends Activity {
         LinearLayout help = card();
         help.addView(sectionTitle("📖  طريقة الاستعمال"));
         help.addView(helpRow("▶", 0xFF22A55B, "تشغيل / إيقاف"));
-        help.addView(helpRow("☾", 0xFF334155, "نوم: النقط ما كيتلمسوش، وكيبقى غير زر ☀ باش توقظ"));
+        help.addView(helpRow("☾", 0xFF334155, "نوم: كلشي كيختفي، وكيبقى غير زر ☀ باش توقظ"));
         help.addView(helpRow("+", 0xFF3D8BFD, "زيد خطوة جديدة"));
         help.addView(helpRow("++", 0xFFA855F7, "نقر متعدد: نقطة كتنقر مع اللي قبلها فنفس اللحظة"));
         help.addView(helpRow("−", 0xFFF59E0B, "حيد آخر نقطة"));
