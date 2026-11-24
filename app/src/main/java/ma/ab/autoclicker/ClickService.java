@@ -695,6 +695,16 @@ public class ClickService extends AccessibilityService {
             name.setOnClickListener(v -> loadMacro(MacroStore.get(this, idx)));
             row.addView(name, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView upd = circleButton("⟳", 0xFF1E3A5F, 38, 16);
+            upd.setOnClickListener(v -> {
+                if (pts.isEmpty()) return;
+                try {
+                    MacroStore.update(this, idx, currentMacro(m.optString("name")));
+                    Toast.makeText(this, "✓ تحدّث: " + m.optString("name"), Toast.LENGTH_SHORT).show();
+                } catch (Exception ignored) { }
+                openMacros();
+            });
+            row.addView(upd);
             TextView del = circleButton("🗑", 0xFF3A1F22, 38, 13);
             del.setOnClickListener(v -> { MacroStore.delete(this, idx); openMacros(); });
             row.addView(del);

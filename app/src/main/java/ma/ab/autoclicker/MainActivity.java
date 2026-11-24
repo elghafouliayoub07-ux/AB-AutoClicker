@@ -273,7 +273,7 @@ public class MainActivity extends Activity {
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
             row.addView(smallButton("▶", GREEN, v -> loadMacro(idx)));
-            row.addView(smallButton("✎", 0xFF2C313A, v -> renameMacro(idx, m.optString("name"))));
+            row.addView(smallButton("✎", 0xFF2C313A, v -> editMacro(idx)));
             row.addView(smallButton("🗑", 0xFF3A1F22, v -> {
                 MacroStore.delete(this, idx);
                 refreshMacros();
@@ -299,20 +299,122 @@ public class MainActivity extends Activity {
         moveTaskToBack(true);
     }
 
-    private void renameMacro(int idx, String current) {
-        EditText e = new EditText(this);
-        e.setText(current);
-        e.setSelectAllOnFocus(true);
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("سمية الماكرو")
-                .setView(e)
+    /** تعديل شامل ديال ماكرو محفوظ: السمية، الأوقات، الدورات، وإعدادات كل نقطة. */
+    private void editMacro(int idx) {
+        JSONObject m = MacroStore.get(this, idx);
+        if (m == null) return;
+        JSONArray points = m.optJSONArray("points");
+        if (points == null) points = new JSONArray();
+        final JSONArray pts = points;
+
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        form.setPadding(dp(20), dp(8), dp(20), dp(8));
+
+        form.addView(label("السمية"));
+        EditText name = field(m.optString("name"), InputType.TYPE_CLASS_TEXT);
+        form.addView(name);
+
+        form.addView(label("الوقت بين خطوة وخطوة (ms)"));
+        EditText interval = field(String.valueOf(m.optLong("interval", 500)), InputType.TYPE_CLASS_NUMBER);
+        form.addView(interval);
+
+        form.addView(label("الوقت بين دورة ودورة (بالثواني)"));
+        EditText cycleInt = field(secondsText(m.optLong("cycleInterval", 500)),
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        form.addView(cycleInt);
+
+        form.addView(label("عدد الدورات (0 = بلا توقف)"));
+        EditText cycles = field(String.valueOf(m.optLong("cycles", 0)), InputType.TYPE_CLASS_NUMBER);
+        form.addView(cycles);
+
+        // ── النقط ──
+        final EditText[] counts = new EditText[pts.length()];
+        final EditText[] gaps = new EditText[pts.length()];
+        final android.widget.CheckBox[] joins = new android.widget.CheckBox[pts.length()];
+        if (pts.length() > 0) {
+            TextView t = sectionTitle("\nالنقط");
+            form.addView(t);
+            form.addView(hint("عدد النقرات · الوقت بين نقرة ونقرة (ms) · نقر متعدد مع اللي قبلها"));
+        }
+        for (int i = 0; i < pts.length(); i++) {
+            JSONObject o = pts.optJSONObject(i);
+            if (o == null) o = new JSONObject();
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(dp(12), dp(8), dp(12), dp(10));
+            box.setBackground(rounded(FIELD, 12));
+            LinearLayout.LayoutParams bp = full();
+            bp.topMargin = dp(10);
+            box.setLayoutParams(bp);
+
+            TextView title = text("النقطة " + (i + 1), 14, Color.WHITE);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            box.addView(title);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(text("النقرات", 12.5f, MUTED));
+            counts[i] = field(String.valueOf(o.optInt("count", 1)), InputType.TYPE_CLASS_NUMBER);
+            row.addView(counts[i], new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(text("  ms", 12.5f, MUTED));
+            gaps[i] = field(String.valueOf(o.optLong("gap", 100)), InputType.TYPE_CLASS_NUMBER);
+            row.addView(gaps[i], new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f));
+            box.addView(row);
+
+            joins[i] = new android.widget.CheckBox(this);
+            joins[i].setText("نقر متعدد: مع النقطة اللي قبلها فنفس اللحظة");
+            joins[i].setTextColor(0xFFDADCE0);
+            joins[i].setTextSize(12.5f);
+            joins[i].setChecked(i > 0 && o.optBoolean("join", false));
+            joins[i].setEnabled(i > 0);
+            box.addView(joins[i]);
+            form.addView(box);
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("✎  تعديل الماكرو")
+                .setView(scroll)
                 .setPositiveButton("حفظ", (d, w) -> {
-                    String n = e.getText().toString().trim();
-                    if (!n.isEmpty()) MacroStore.rename(this, idx, n);
+                    try {
+                        String n = name.getText().toString().trim();
+                        if (!n.isEmpty()) m.put("name", n);
+                        m.put("interval", Math.max(MIN_INTERVAL, parse(interval, 500)));
+                        m.put("cycleInterval", Math.max(MIN_INTERVAL, parseSeconds(cycleInt, 500)));
+                        m.put("cycles", Math.max(0, parse(cycles, 0)));
+                        for (int i = 0; i < pts.length(); i++) {
+                            JSONObject o = pts.optJSONObject(i);
+                            if (o == null) continue;
+                            o.put("count", (int) Math.max(1, Math.min(9999, parse(counts[i], 1))));
+                            o.put("gap", Math.max(ClickService.MIN_GAP, Math.min(60000, parse(gaps[i], 100))));
+                            o.put("join", i > 0 && joins[i].isChecked());
+                        }
+                        m.put("points", pts);
+                        MacroStore.update(this, idx, m);
+                        Toast.makeText(this, "✓ تحفظ", Toast.LENGTH_SHORT).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "ما تحفظش", Toast.LENGTH_SHORT).show();
+                    }
                     refreshMacros();
                 })
                 .setNegativeButton("إلغاء", null)
                 .show();
+    }
+
+    private EditText field(String value, int inputType) {
+        EditText e = new EditText(this);
+        e.setInputType(inputType);
+        e.setText(value);
+        e.setTextColor(Color.WHITE);
+        e.setTextSize(15);
+        e.setGravity(Gravity.CENTER);
+        e.setSingleLine(true);
+        return e;
     }
 
     /** 1500 ms ← "1.5" */

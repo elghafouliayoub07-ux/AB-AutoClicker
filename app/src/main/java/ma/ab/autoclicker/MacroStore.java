@@ -54,6 +54,13 @@ final class MacroStore {
         write(c, out);
     }
 
+    static void update(Context c, int i, JSONObject macro) {
+        JSONArray arr = all(c);
+        if (i < 0 || i >= arr.length()) return;
+        try { arr.put(i, macro); } catch (Exception ignored) { }
+        write(c, arr);
+    }
+
     static void rename(Context c, int i, String name) {
         JSONArray arr = all(c);
         JSONObject m = arr.optJSONObject(i);
