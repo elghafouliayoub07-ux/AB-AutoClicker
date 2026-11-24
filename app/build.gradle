@@ -14,11 +14,23 @@ android {
         versionName '1.6'
     }
 
+    // مفتاح توقيع ثابت: باش كل نسخة جديدة تتثبت فوق القديمة بلا مشكل
+    signingConfigs {
+        fixed {
+            storeFile file('ab-debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
         release {
             minifyEnabled false
-            // كيتوقّع بمفتاح debug باش الـ APK يتثبّت مباشرة فالتليفون
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.fixed
         }
     }
 
