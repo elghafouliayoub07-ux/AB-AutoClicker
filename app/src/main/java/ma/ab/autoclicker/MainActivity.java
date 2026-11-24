@@ -127,16 +127,28 @@ public class MainActivity extends Activity {
         settings.addView(label("الوقت بين خطوة وخطوة (ms)"));
         intervalInput = number(String.valueOf(prefs.getLong(KEY_INTERVAL, 500)));
         settings.addView(intervalInput);
-        settings.addView(label("الوقت بين دورة ودورة (ms)"));
-        cycleIntervalInput = number(String.valueOf(prefs.getLong(KEY_CYCLE_INTERVAL,
+        settings.addView(label("الوقت بين دورة ودورة (بالثواني)"));
+        cycleIntervalInput = number(secondsText(prefs.getLong(KEY_CYCLE_INTERVAL,
                 prefs.getLong(KEY_INTERVAL, 500))));
+        cycleIntervalInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         settings.addView(cycleIntervalInput);
-        settings.addView(hint("من بعد آخر خطوة، كيتسنى هاد الوقت قبل ما يرجع للخطوة 1"));
+        settings.addView(hint("من بعد آخر خطوة، كيتسنى هاد الوقت قبل ما يرجع للخطوة 1 (مثلا 2 ولا 0.5)"));
         settings.addView(label("عدد الدورات"));
         cyclesInput = number(String.valueOf(prefs.getLong(KEY_CYCLES, 0)));
         settings.addView(cyclesInput);
         settings.addView(hint("0 = بلا توقف · 1000 ms = ثانية"));
+        settings.addView(hint("✓ كيتحفظو أوتوماتيكياً ملي كتكتب"));
         root.addView(settings);
+
+        // حفظ أوتوماتيكي ملي كيتبدل أي رقم
+        android.text.TextWatcher autosave = new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence c, int a, int b, int d) { }
+            public void onTextChanged(CharSequence c, int a, int b, int d) { }
+            public void afterTextChanged(android.text.Editable e) { saveSettings(); }
+        };
+        intervalInput.addTextChangedListener(autosave);
+        cycleIntervalInput.addTextChangedListener(autosave);
+        cyclesInput.addTextChangedListener(autosave);
 
         TextView start = button("▶   إظهار اللوحة العائمة", GREEN, v -> saveAndShow());
         LinearLayout.LayoutParams sp = full();
@@ -156,7 +168,7 @@ public class MainActivity extends Activity {
         LinearLayout help = card();
         help.addView(sectionTitle("📖  طريقة الاستعمال"));
         help.addView(helpRow("▶", 0xFF22A55B, "تشغيل / إيقاف"));
-        help.addView(helpRow("☾", 0xFF334155, "نوم: اللوحة والنقط كيبقاو ظاهرين ولكن ما كيتلمسوش"));
+        help.addView(helpRow("☾", 0xFF334155, "نوم: النقط ما كيتلمسوش، وكيبقى غير زر ☀ باش توقظ"));
         help.addView(helpRow("+", 0xFF3D8BFD, "زيد خطوة جديدة"));
         help.addView(helpRow("++", 0xFFA855F7, "نقر متعدد: نقطة كتنقر مع اللي قبلها فنفس اللحظة"));
         help.addView(helpRow("−", 0xFFF59E0B, "حيد آخر نقطة"));
@@ -164,7 +176,7 @@ public class MainActivity extends Activity {
         help.addView(helpRow("✕", 0xFF5F6368, "سد اللوحة"));
         help.addView(hint("\n• لمسة قصيرة على النقطة كتحل الإعدادات ديالها: عدد النقرات، الوقت بين نقرة ونقرة، "
                 + "والنقر المتعدد.\n"
-                + "• باش توقظ اللوحة من النوم: من الإشعار ولا من هاد الصفحة.\n"
+                + "• باش توقظ: ضغط ☀ فاللوحة (ولا من الإشعار).\n"
                 + "• ملي كيخدم الماكرو كيبقاو غير ▶ و ☾.\n"
                 + "• جر اللوحة من أي زر فيها."));
         root.addView(help);
@@ -194,6 +206,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // نرجعو القيم من الحفظ (ممكن تبدلو من اللوحة ملي تحمّل ماكرو)
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        intervalInput.setText(String.valueOf(prefs.getLong(KEY_INTERVAL, 500)));
+        cycleIntervalInput.setText(secondsText(prefs.getLong(KEY_CYCLE_INTERVAL, 500)));
+        cyclesInput.setText(String.valueOf(prefs.getLong(KEY_CYCLES, 0)));
         refreshStatus();
         refreshMacros();
     }
@@ -238,7 +255,8 @@ public class MainActivity extends Activity {
             name.setTypeface(Typeface.DEFAULT_BOLD);
             info.addView(name);
             info.addView(text((p == null ? 0 : p.length()) + " نقط · "
-                    + m.optLong("interval") + " / " + m.optLong("cycleInterval") + " ms", 12, MUTED));
+                    + m.optLong("interval") + " ms بين الخطوات · "
+                    + secondsText(m.optLong("cycleInterval")) + " ث بين الدورات", 12, MUTED));
             row.addView(info, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -257,7 +275,7 @@ public class MainActivity extends Activity {
         if (m == null) return;
         MacroStore.applySettings(this, m);
         intervalInput.setText(String.valueOf(m.optLong("interval", 500)));
-        cycleIntervalInput.setText(String.valueOf(m.optLong("cycleInterval", 500)));
+        cycleIntervalInput.setText(secondsText(m.optLong("cycleInterval", 500)));
         cyclesInput.setText(String.valueOf(m.optLong("cycles", 0)));
         ClickService s = ClickService.instance;
         if (s == null) {
@@ -285,17 +303,42 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    private void saveAndShow() {
+    /** 1500 ms ← "1.5" */
+    static String secondsText(long ms) {
+        if (ms % 1000 == 0) return String.valueOf(ms / 1000);
+        String s = String.valueOf(ms / 1000.0);
+        return s.contains(".") ? s.replaceAll("0+$", "").replaceAll("\\.$", "") : s;
+    }
+
+    private long parseSeconds(EditText e, long defMs) {
+        try {
+            String t = e.getText().toString().trim().replace(',', '.');
+            return Math.round(Double.parseDouble(t) * 1000);
+        } catch (Exception ex) {
+            return defMs;
+        }
+    }
+
+    /** كيحفظ الإعدادات مباشرة (الماكرو كيقراهم ملي كتضغط ▶). */
+    private void saveSettings() {
         long interval = Math.max(MIN_INTERVAL, parse(intervalInput, 500));
-        long cycleInterval = Math.max(MIN_INTERVAL, parse(cycleIntervalInput, interval));
+        long cycleInterval = Math.max(MIN_INTERVAL, parseSeconds(cycleIntervalInput, interval));
         long cycles = Math.max(0, parse(cyclesInput, 0));
-        intervalInput.setText(String.valueOf(interval));
-        cycleIntervalInput.setText(String.valueOf(cycleInterval));
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putLong(KEY_INTERVAL, interval)
                 .putLong(KEY_CYCLE_INTERVAL, cycleInterval)
                 .putLong(KEY_CYCLES, cycles)
                 .apply();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        saveSettings();
+    }
+
+    private void saveAndShow() {
+        saveSettings();
 
         ClickService s = ClickService.instance;
         if (s == null) {

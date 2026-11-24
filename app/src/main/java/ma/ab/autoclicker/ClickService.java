@@ -53,7 +53,7 @@ public class ClickService extends AccessibilityService {
 
     static ClickService instance;
 
-    private static final int BTN_DP = 34;
+    private static final int BTN_DP = 42;
     private static final int POINT_DP = 44;
     private static final long TAP_MS = 20;
     private static final long MERGE_MS = 30;
@@ -373,24 +373,24 @@ public class ClickService extends AccessibilityService {
         panel.setPadding(dp(3), dp(3), dp(3), dp(3));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xCC16181D);
-        bg.setCornerRadius(dp(21));
+        bg.setCornerRadius(dp(25));
         panel.setBackground(bg);
 
         panelLp = overlayParams();
 
-        playBtn = circleButton("▶", 0xFF22A55B, BTN_DP, 14);
+        playBtn = circleButton("▶", 0xFF22A55B, BTN_DP, 17);
         playBtn.setOnClickListener(v -> toggle());
-        sleepBtn = circleButton("☾", 0xFF334155, BTN_DP, 16);
-        sleepBtn.setOnClickListener(v -> setSleeping(true));
-        TextView addStep = circleButton("+", 0xFF3D8BFD, BTN_DP, 17);
+        sleepBtn = circleButton("☾", 0xFF334155, BTN_DP, 19);
+        sleepBtn.setOnClickListener(v -> setSleeping(!sleeping));
+        TextView addStep = circleButton("+", 0xFF3D8BFD, BTN_DP, 21);
         addStep.setOnClickListener(v -> addPoint(false));
-        TextView addMulti = circleButton("++", 0xFFA855F7, BTN_DP, 12);
+        TextView addMulti = circleButton("++", 0xFFA855F7, BTN_DP, 15);
         addMulti.setOnClickListener(v -> addPoint(true));
-        TextView remove = circleButton("−", 0xFFF59E0B, BTN_DP, 17);
+        TextView remove = circleButton("−", 0xFFF59E0B, BTN_DP, 21);
         remove.setOnClickListener(v -> { if (!pts.isEmpty()) removePoint(pts.size() - 1); });
-        TextView macros = circleButton("💾", 0xFF0E7490, BTN_DP, 13);
+        TextView macros = circleButton("💾", 0xFF0E7490, BTN_DP, 16);
         macros.setOnClickListener(v -> openMacros());
-        TextView close = circleButton("✕", 0xFF5F6368, BTN_DP, 13);
+        TextView close = circleButton("✕", 0xFF5F6368, BTN_DP, 16);
         close.setOnClickListener(v -> hidePanel());
 
         extraButtons.clear();
@@ -438,20 +438,29 @@ public class ClickService extends AccessibilityService {
         pts.clear();
     }
 
-    private void setPanelCollapsed(boolean collapsed) {
-        for (View b : extraButtons) b.setVisibility(collapsed ? View.GONE : View.VISIBLE);
-        if (panel != null) update(panel, panelLp);
+    /**
+     * شنو كيبان فاللوحة:
+     *  - نايم: غير زر ☀ (باش توقظ)
+     *  - خدام: ▶/■ و ☾
+     *  - عادي: كلشي
+     */
+    private void refreshPanelButtons() {
+        if (panel == null) return;
+        playBtn.setVisibility(sleeping ? View.GONE : View.VISIBLE);
+        for (View b : extraButtons) b.setVisibility(sleeping || running ? View.GONE : View.VISIBLE);
+        sleepBtn.setText(sleeping ? "☀" : "☾");
+        ((GradientDrawable) sleepBtn.getBackground()).setColor(sleeping ? 0xFFF59E0B : 0xFF334155);
+        update(panel, panelLp);
     }
 
-    /** النوم: كلشي كيبقى ظاهر ولكن اللمس كيدوز من تحتو بحال إلا ما كاينش. */
+    /** النوم: النقط ما كيتلمسوش، واللوحة كيبقى فيها غير زر ☀ باش توقظ. */
     void setSleeping(boolean s) {
         if (panel == null) s = false;
         if (s) { closeEditor(); closeMacros(); }
         sleeping = s;
+        refreshPanelButtons();
         applyTouchability();
         updateNotification();
-        if (s) Toast.makeText(this, "😴 نايم — باش توقظو: من الإشعار ولا من التطبيق",
-                Toast.LENGTH_LONG).show();
     }
 
     private void setTouchable(View v, WindowManager.LayoutParams lp, boolean touchable) {
@@ -462,8 +471,8 @@ public class ClickService extends AccessibilityService {
 
     private void applyTouchability() {
         if (panel != null) {
-            setTouchable(panel, panelLp, !sleeping);
-            panel.setAlpha(sleeping ? 0.4f : 1f);
+            setTouchable(panel, panelLp, true);
+            panel.setAlpha(sleeping ? 0.75f : 1f);
         }
         boolean pointsTouchable = !sleeping && !running;
         for (Pt p : pts) {
@@ -881,7 +890,7 @@ public class ClickService extends AccessibilityService {
         stepIndex = 0;
         cyclesDone = 0;
         applyTouchability();
-        setPanelCollapsed(true);
+        refreshPanelButtons();
         playBtn.setText("■");
         ((GradientDrawable) playBtn.getBackground()).setColor(0xFFE5484D);
         updateNotification();
@@ -896,7 +905,7 @@ public class ClickService extends AccessibilityService {
             playBtn.setText("▶");
             ((GradientDrawable) playBtn.getBackground()).setColor(0xFF22A55B);
         }
-        setPanelCollapsed(false);
+        refreshPanelButtons();
         applyTouchability();
         if (was) updateNotification();
     }
