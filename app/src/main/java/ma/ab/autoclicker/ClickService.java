@@ -65,6 +65,7 @@ public class ClickService extends AccessibilityService {
     private static final String ACT_SLEEP = "ma.ab.autoclicker.SLEEP";
     private static final String ACT_PLAY = "ma.ab.autoclicker.PLAY";
     private static final String ACT_SHOW = "ma.ab.autoclicker.SHOW";
+    private static final String ACT_EXIT = "ma.ab.autoclicker.EXIT";
 
     private static final int[] STEP_COLORS = {
             0xFFE5484D, 0xFF3D8BFD, 0xFF22A55B, 0xFFF59E0B,
@@ -121,6 +122,7 @@ public class ClickService extends AccessibilityService {
             if (ACT_SLEEP.equals(a)) setSleeping(!sleeping);
             else if (ACT_PLAY.equals(a)) toggle();
             else if (ACT_SHOW.equals(a)) showPanel();
+            else if (ACT_EXIT.equals(a)) exitAll();
         }
     };
 
@@ -137,6 +139,7 @@ public class ClickService extends AccessibilityService {
             f.addAction(ACT_SLEEP);
             f.addAction(ACT_PLAY);
             f.addAction(ACT_SHOW);
+            f.addAction(ACT_EXIT);
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(actions, f, 4 /* RECEIVER_NOT_EXPORTED */);
             else registerReceiver(actions, f);
         } catch (Exception ignored) { }
@@ -185,9 +188,26 @@ public class ClickService extends AccessibilityService {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
+    /** خروج: كيوقف الماكرو، كيسد اللوحة والنقط، وكيحيد الإشعار. الخدمة كتبقى مفعّلة (بلا إذن جديد). */
+    void exitAll() {
+        hidePanel();
+        try { getSystemService(NotificationManager.class).cancel(NOTIF_ID); } catch (Exception ignored) { }
+    }
+
+    /** إيقاف الخدمة نهائياً (من بعد خاصك تعاود تفعّلها من إعدادات إمكانية الوصول). */
+    void turnOffService() {
+        exitAll();
+        try { disableSelf(); } catch (Exception ignored) { }
+    }
+
     void updateNotification() {
         try {
             NotificationManager nm = getSystemService(NotificationManager.class);
+            // الإشعار كيبان غير ملي اللوحة ظاهرة
+            if (panel == null) {
+                nm.cancel(NOTIF_ID);
+                return;
+            }
             Notification.Builder b;
             if (Build.VERSION.SDK_INT >= 26) {
                 NotificationChannel ch = new NotificationChannel(CHANNEL, "اللوحة العائمة",
@@ -205,8 +225,7 @@ public class ClickService extends AccessibilityService {
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             String text;
-            if (panel == null) text = "واجد · اللوحة مسدودة";
-            else if (sleeping) text = "😴 نايم: اللوحة والنقط ما كيتلمسوش";
+            if (sleeping) text = "😴 نايم: اللوحة والنقط ما كيتلمسوش";
             else if (running) text = "▶ الماكرو خدام";
             else text = "اللوحة ظاهرة";
 
@@ -219,14 +238,11 @@ public class ClickService extends AccessibilityService {
                     .setShowWhen(false);
 
             Icon ic = Icon.createWithResource(this, R.drawable.ic_stat);
-            if (panel == null) {
-                b.addAction(new Notification.Action.Builder(ic, "إظهار اللوحة", broadcast(ACT_SHOW, 1)).build());
-            } else {
-                b.addAction(new Notification.Action.Builder(ic,
-                        sleeping ? "☀ إيقاظ" : "☾ نوم", broadcast(ACT_SLEEP, 2)).build());
-                b.addAction(new Notification.Action.Builder(ic,
-                        running ? "■ إيقاف" : "▶ تشغيل", broadcast(ACT_PLAY, 3)).build());
-            }
+            b.addAction(new Notification.Action.Builder(ic,
+                    sleeping ? "☀ إيقاظ" : "☾ نوم", broadcast(ACT_SLEEP, 2)).build());
+            b.addAction(new Notification.Action.Builder(ic,
+                    running ? "■ إيقاف" : "▶ تشغيل", broadcast(ACT_PLAY, 3)).build());
+            b.addAction(new Notification.Action.Builder(ic, "⏻ خروج", broadcast(ACT_EXIT, 4)).build());
             nm.notify(NOTIF_ID, b.build());
         } catch (Exception ignored) { }
     }
@@ -400,8 +416,8 @@ public class ClickService extends AccessibilityService {
         remove.setOnClickListener(v -> { if (!pts.isEmpty()) removePoint(pts.size() - 1); });
         TextView macros = circleButton("💾", 0xFF0E7490, BTN_DP, 16);
         macros.setOnClickListener(v -> openMacros());
-        TextView close = circleButton("✕", 0xFF5F6368, BTN_DP, 16);
-        close.setOnClickListener(v -> hidePanel());
+        TextView close = circleButton("⏻", 0xFF5F6368, BTN_DP, 17);
+        close.setOnClickListener(v -> exitAll());
 
         extraButtons.clear();
         Collections.addAll(extraButtons, addStep, addMulti, remove, macros, close);

@@ -168,6 +168,13 @@ public class MainActivity extends Activity {
         sp.height = dp(56);
         root.addView(start, sp);
 
+        TextView exit = button("⏻   خروج", 0xFF3A1F22, v -> {
+            ClickService sv = ClickService.instance;
+            if (sv != null) sv.exitAll();
+            finishAndRemoveTask();
+        });
+        root.addView(exit);
+
         // ── الماكروات المحفوظة ──
         LinearLayout macros = card();
         macros.addView(sectionTitle("💾  الماكروات المحفوظة"));
@@ -185,7 +192,7 @@ public class MainActivity extends Activity {
         help.addView(helpRow("++", 0xFFA855F7, "نقر متعدد: نقطة كتنقر مع اللي قبلها فنفس اللحظة"));
         help.addView(helpRow("−", 0xFFF59E0B, "حيد آخر نقطة"));
         help.addView(helpRow("💾", 0xFF0E7490, "حفظ الماكرو الحالي ولا تحميل واحد محفوظ"));
-        help.addView(helpRow("✕", 0xFF5F6368, "سد اللوحة"));
+        help.addView(helpRow("⏻", 0xFF5F6368, "خروج: كيوقف الماكرو وكيسد اللوحة والإشعار"));
         help.addView(hint("\n• لمسة قصيرة على النقطة كتحل الإعدادات ديالها: عدد النقرات، الوقت بين نقرة ونقرة، "
                 + "والنقر المتعدد.\n"
                 + "• باش توقظ: ضغط ☀ فاللوحة (ولا من الإشعار).\n"
@@ -208,6 +215,21 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }));
         root.addView(miui);
+
+        TextView off = text("إيقاف الخدمة نهائياً", 13, 0xFFE5484D);
+        off.setGravity(Gravity.CENTER);
+        off.setPadding(0, dp(22), 0, dp(6));
+        off.setOnClickListener(v -> new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("إيقاف الخدمة نهائياً؟")
+                .setMessage("الخدمة غادي تطفا من إعدادات أندرويد. باش تستعمل التطبيق من بعد، خاصك تعاود تفعّلها وتعطيها الإذن.\n\nإلا بغيتي غير تسد اللوحة، استعمل «خروج».")
+                .setPositiveButton("إيقاف", (d, w2) -> {
+                    ClickService sv = ClickService.instance;
+                    if (sv != null) sv.turnOffService();
+                    refreshStatus();
+                })
+                .setNegativeButton("إلغاء", null)
+                .show());
+        root.addView(off);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BG);
