@@ -20,6 +20,7 @@ public class PointView extends View {
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cross = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint crossDark = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint badge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -32,13 +33,13 @@ public class PointView extends View {
         ring.setStrokeWidth(2.2f * d);
         cross.setColor(Color.WHITE);
         cross.setStrokeWidth(1.4f * d);
-        cross.setShadowLayer(1.5f * d, 0, 0, Color.BLACK);
+        crossDark.setColor(0xAA000000);
+        crossDark.setStrokeWidth(3.2f * d);
         dot.setColor(0xFFFFD43B);
         text.setColor(Color.WHITE);
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setTextAlign(Paint.Align.CENTER);
         text.setTextSize(9f * d);
-        setLayerType(LAYER_TYPE_SOFTWARE, null); // باش يخدم الظل ديال الصليب
     }
 
     void set(int step, int count, int color) {
@@ -59,10 +60,13 @@ public class PointView extends View {
         c.drawCircle(cx, cy, r, ring);
 
         float gap = 2.5f * d, len = 15f * d;
-        c.drawLine(cx - len, cy, cx - gap, cy, cross);
-        c.drawLine(cx + gap, cy, cx + len, cy, cross);
-        c.drawLine(cx, cy - len, cx, cy - gap, cross);
-        c.drawLine(cx, cy + gap, cx, cy + len, cross);
+        // خط كحل تحت الأبيض باش يبان فوق أي خلفية (بلا ظل ثقيل)
+        for (Paint pp : new Paint[]{crossDark, cross}) {
+            c.drawLine(cx - len, cy, cx - gap, cy, pp);
+            c.drawLine(cx + gap, cy, cx + len, cy, pp);
+            c.drawLine(cx, cy - len, cx, cy - gap, pp);
+            c.drawLine(cx, cy + gap, cx, cy + len, pp);
+        }
         c.drawCircle(cx, cy, 1.6f * d, dot);
 
         drawBadge(c, 7f * d, 7f * d, String.valueOf(step), color | 0xFF000000);
